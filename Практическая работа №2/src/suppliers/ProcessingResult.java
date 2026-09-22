@@ -29,7 +29,8 @@ public final class ProcessingResult {
         sb.append("Size: ").append(size).append(" bytes\n");
         sb.append("SHA-256: ").append(sha256).append('\n');
         sb.append("Read via: ").append(readMethod).append('\n');
-        sb.append("Rows: valid=").append(validRows).append(", invalid=").append(invalidRows).append('\n');
+        sb.append("Rows: valid=").append(validRows).append(", invalid=").append(invalidRows)
+                .append(", suppliers=").append(totalBySupplier.size()).append('\n');
         for (String e : errors) {
             sb.append("  ! ").append(e).append('\n');
         }

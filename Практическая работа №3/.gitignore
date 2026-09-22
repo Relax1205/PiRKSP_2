@@ -1,0 +1,11 @@
+out/
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# ОС
+Thumbs.db
+.DS_Store

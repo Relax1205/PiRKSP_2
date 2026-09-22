@@ -4,6 +4,7 @@ import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -34,6 +35,18 @@ public class Main {
         Path incoming = base.resolve("incoming");
         Path processed = base.resolve("processed");
         Path failed = base.resolve("failed");
+
+        if (a.contains("--tasks")) {
+            Tasks.runAll(base.resolve("tasks"));
+            return;
+        }
+        if (a.contains("--monitor")) {
+            Path monitored = base.resolve("monitor");
+            DirectoryInspector.ensureDirectory(monitored);
+            if (a.contains("--demo")) startMonitorDemo(monitored);
+            new DirectoryMonitor(monitored).run();
+            return;
+        }
 
         System.out.println("=== 1. Рабочие каталоги ===");
         DirectoryInspector.ensureDirectory(base);
@@ -72,6 +85,28 @@ public class Main {
             Files.copy(p, to.resolve(p.getFileName()), StandardCopyOption.REPLACE_EXISTING);
         }
         System.out.println("Тестовые файлы скопированы из " + from + " в " + to);
+    }
+
+    /** Создаёт, дописывает, переписывает и удаляет файл, чтобы показать все три события DirectoryMonitor. */
+    private static void startMonitorDemo(final Path dir) {
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Path f = dir.resolve("demo.txt");
+                try {
+                    Thread.sleep(2000);
+                    Files.write(f, Arrays.asList("поставщик 1", "поставщик 2", "поставщик 3"), StandardCharsets.UTF_8);
+                    Thread.sleep(2000);
+                    Files.write(f, Arrays.asList("поставщик 1", "поставщик 3", "поставщик 4"), StandardCharsets.UTF_8);
+                    Thread.sleep(2000);
+                    Files.delete(f);
+                } catch (Exception e) {
+                    System.err.println("demo: " + e);
+                }
+            }
+        });
+        t.setDaemon(true);
+        t.start();
     }
 
     private static void startDemoFeeder(final Path from, final Path to) {

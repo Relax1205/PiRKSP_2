@@ -43,10 +43,18 @@ public final class SupplierRecord {
         int qty;
         try {
             id = Integer.parseInt(f[0].trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("некорректное число в supplierId: \"" + f[0].trim() + "\"");
+        }
+        try {
             price = new BigDecimal(f[3].trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("некорректное число в price: \"" + f[3].trim() + "\"");
+        }
+        try {
             qty = Integer.parseInt(f[4].trim());
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("некорректное число: " + e.getMessage());
+            throw new IllegalArgumentException("некорректное число в quantity: \"" + f[4].trim() + "\"");
         }
         String name = f[1].trim();
         String product = f[2].trim();

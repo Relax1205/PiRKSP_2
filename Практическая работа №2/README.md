@@ -7,17 +7,30 @@ run.bat --seed            :: скопировать 3 тестовых файл�
 run.bat --seed --demo     :: то же + каждые 5 с сам подбрасывает suppliers_04/05 и broken_06 (для скриншота WatchService)
 run.bat --seed --once     :: обработать и выйти
 ```
+
+Задания из методички (docx):
+
+```
+run.bat --tasks             :: задания 1-3: чтение .txt, копирование 100 МБ четырьмя способами (время, пик кучи), 16-битная сумма
+run.bat --monitor --demo    :: задание 4: CREATE/MODIFY (добавленные/удалённые строки)/DELETE (размер + 16-битная сумма)
+```
+
+Apache Commons IO лежит в `lib/commons-io-2.15.1.jar` (подключается в `run.bat`). При удалении файл уже нельзя прочитать,
+поэтому `DirectoryMonitor` хранит снимок (строки, размер, сумма), обновляемый при создании и изменении.
+
 Вручную: во время работы скопируйте любой .csv в `data/incoming` — появится «Обнаружен новый файл: ...».
 
 Формат: `supplierId,supplierName,product,price,quantity` (UTF-8, поля без кавычек и без запятых внутри).
 
 ## Сценарий
+
 WatchService (ENTRY_CREATE) → ожидание готовности файла → чтение
 (первый файл — `FileChannel` + `ByteBuffer`, остальные — `Files.readAllLines`) → валидация и суммы по поставщикам →
 SHA-256 → `Files.move` в `data/processed` (файл без единой корректной строки — в `data/failed`).
 Отчёты дописываются в `data/report.txt`.
 
 ## Структура
+
 - `DirectoryInspector` — проверка/создание каталога, листинг (имя, размер, время изменения), поиск по расширению
 - `FileProcessor` — чтение, разбор, SHA-256, перемещение
 - `IncomingWatcher` — WatchService
