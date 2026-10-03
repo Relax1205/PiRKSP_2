@@ -1,0 +1,55 @@
+### Все запросы идут через Traefik (порт 80) — сервисы наружу не публикуются.
+@host = http://localhost
+
+### ---------- Order Service ----------
+### Список продуктов
+GET {{host}}/api/products
+
+### Список клиентов
+GET {{host}}/api/customers
+
+### Все заказы
+GET {{host}}/api/orders
+
+### Заказы в сборке и доставке
+GET {{host}}/api/orders?status=ASSEMBLY&status=DELIVERY
+
+### Заказ по id
+GET {{host}}/api/orders/2
+
+### Создать заказ (адрес доставки = основной адрес клиента)
+POST {{host}}/api/orders
+Content-Type: application/json
+{
+  "customerId": 1,
+  "comment": "Позвонить за 10 минут",
+  "items": [
+    { "productId": 1, "quantity": 2 },
+    { "productId": 5, "quantity": 1 }
+  ]
+}
+
+### Сменить статус заказа: DRAFT -> FIXED -> ASSEMBLY
+PATCH {{host}}/api/orders/1/status
+Content-Type: application/json
+
+{ "status": "FIXED" }
+
+### ---------- Delivery Service (межсервисное взаимодействие) ----------
+### Какой экземпляр ответил (балансировка) — повторите несколько раз
+GET {{host}}/api/deliveries/instance
+
+### Информация о доставке: Delivery Service -> Order Service -> расчёт доставки
+GET {{host}}/api/deliveries/2
+
+### Активные доставки (заказы в ASSEMBLY и DELIVERY)
+GET {{host}}/api/deliveries
+
+### Передать заказ курьеру (ASSEMBLY -> DELIVERY)
+POST {{host}}/api/deliveries/2/dispatch
+
+### Заказ доставлен (DELIVERY -> COMPLETED)
+POST {{host}}/api/deliveries/2/complete
+
+### Ошибка: заказа нет -> 404 из Order Service
+GET {{host}}/api/deliveries/999

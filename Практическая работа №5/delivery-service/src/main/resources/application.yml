@@ -1,0 +1,40 @@
+# Все параметры окружения берутся из переменных окружения (см. compose.yaml и .env).
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: delivery-service
+  mvc:
+    problemdetails:
+      enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+# Адрес Order Service — только из окружения, в коде не прописан.
+order-service:
+  url: ${ORDER_SERVICE_URL}
+  connect-timeout: ${ORDER_SERVICE_CONNECT_TIMEOUT:2s}
+  read-timeout: ${ORDER_SERVICE_READ_TIMEOUT:5s}
+
+delivery:
+  base-cost: ${DELIVERY_BASE_COST:199}
+  free-threshold: ${DELIVERY_FREE_THRESHOLD:1500}
+  estimated-minutes: ${DELIVERY_ESTIMATED_MINUTES:60}

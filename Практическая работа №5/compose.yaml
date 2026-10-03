@@ -1,0 +1,136 @@
+# Запуск всей системы одной командой:  docker compose up --build
+name: baas-delivery
+
+services:
+
+  # ---------- Единая точка входа и балансировщик ----------
+  traefik:
+    image: traefik:v3.6
+    command:
+      - --entrypoints.web.address=:80
+      - --providers.docker=true
+      # Публикуются только контейнеры с меткой traefik.enable=true
+      - --providers.docker.exposedbydefault=false
+      # Traefik ходит в сервисы через сеть edge
+      - --providers.docker.network=baas-edge
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --ping=true
+      - --accesslog=true
+      - --log.level=INFO
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------- БД Order Service ----------
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------- Order Service: клиенты, товары, заказы ----------
+  order-service:
+    build: ./order-service
+    image: baas/order-service:1.0
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      SEED_DEMO_DATA: "true"
+      TZ: ${TZ:-Europe/Moscow}
+    networks:
+      - edge
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 3s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.orders.entrypoints=web
+      - traefik.http.routers.orders.rule=PathPrefix(`/api/orders`) || PathPrefix(`/api/customers`) || PathPrefix(`/api/products`)
+      - traefik.http.routers.orders.service=orders
+      - traefik.http.services.orders.loadbalancer.server.port=8080
+      - traefik.http.services.orders.loadbalancer.healthcheck.path=/actuator/health/readiness
+      - traefik.http.services.orders.loadbalancer.healthcheck.interval=5s
+      - traefik.http.services.orders.loadbalancer.healthcheck.timeout=2s
+    restart: unless-stopped
+
+  # ---------- Delivery Service: несколько экземпляров за Traefik ----------
+  delivery-service:
+    build: ./delivery-service
+    image: baas/delivery-service:1.0
+    deploy:
+      replicas: ${DELIVERY_REPLICAS:-3}
+    environment:
+      ORDER_SERVICE_URL: http://order-service:8080
+      TZ: ${TZ:-Europe/Moscow}
+      DELIVERY_BASE_COST: ${DELIVERY_BASE_COST}
+      DELIVERY_FREE_THRESHOLD: ${DELIVERY_FREE_THRESHOLD}
+      DELIVERY_ESTIMATED_MINUTES: ${DELIVERY_ESTIMATED_MINUTES}
+    networks:
+      - edge
+      - backend
+    depends_on:
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 3s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.deliveries.entrypoints=web
+      - traefik.http.routers.deliveries.rule=PathPrefix(`/api/deliveries`)
+      - traefik.http.routers.deliveries.service=deliveries
+      - traefik.http.routers.deliveries.middlewares=deliveries-retry
+      # Если экземпляр упал посреди запроса — Traefik повторит запрос на другом
+      - traefik.http.middlewares.deliveries-retry.retry.attempts=3
+      - traefik.http.services.deliveries.loadbalancer.server.port=8080
+      - traefik.http.services.deliveries.loadbalancer.healthcheck.path=/actuator/health/readiness
+      - traefik.http.services.deliveries.loadbalancer.healthcheck.interval=5s
+      - traefik.http.services.deliveries.loadbalancer.healthcheck.timeout=2s
+    restart: unless-stopped
+
+networks:
+  # Внешний контур: Traefik <-> сервисы
+  edge:
+    name: baas-edge
+  # Внутренний контур: сервис <-> сервис, сервис <-> БД
+  backend:
+    name: baas-backend
+    internal: true
+
+volumes:
+  pgdata:
