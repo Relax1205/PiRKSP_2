@@ -1,0 +1,86 @@
+### Запросы для IntelliJ IDEA (HTTP Client) или VS Code (REST Client)
+@delivery = http://localhost:8090
+@orders = http://localhost:8091
+
+### ---------- Delivery Service: Mono и Flux ----------
+### Все доставки — Flux<Delivery> -> JSON-массив
+GET {{delivery}}/api/deliveries
+
+### Фильтр по статусу (оператор filter)
+GET {{delivery}}/api/deliveries?status=IN_TRANSIT
+
+### Тот же Flux, но с Accept: text/event-stream — WebFlux отдаёт его как SSE
+GET {{delivery}}/api/deliveries
+Accept: text/event-stream
+
+### Одна доставка — Mono<Delivery> (аналог RSocket Request-Response)
+GET {{delivery}}/api/deliveries/1
+
+### Доставка + заказ из Order Service (WebClient)
+GET {{delivery}}/api/deliveries/1/details
+
+### Создать доставку: Delivery Service -> WebClient -> Order Service
+POST {{delivery}}/api/deliveries
+Content-Type: application/json
+
+{ "orderId": 1 }
+
+### Изменить доставку: назначить курьера, CREATED -> ACCEPTED
+PUT {{delivery}}/api/deliveries/4
+Content-Type: application/json
+
+{ "courier": "Орлов Игорь", "price": 199, "status": "ACCEPTED" }
+
+### Поток изменений по SSE (аналог RSocket Request-Stream)
+GET {{delivery}}/api/deliveries/4/stream
+Accept: text/event-stream
+
+### Запустить имитацию курьера — статусы появятся в /stream
+POST {{delivery}}/api/deliveries/4/simulate
+
+### Удалить доставку
+DELETE {{delivery}}/api/deliveries/4
+
+### ---------- Ошибки ----------
+### Нет доставки -> 404
+GET {{delivery}}/api/deliveries/999
+
+### Неверный формат id -> 400
+GET {{delivery}}/api/deliveries/abc
+
+### Нет заказа в Order Service -> 422
+POST {{delivery}}/api/deliveries
+Content-Type: application/json
+
+{ "orderId": 999 }
+
+### Заказ отменён -> 409
+POST {{delivery}}/api/deliveries
+Content-Type: application/json
+
+{ "orderId": 6 }
+
+### Валидация тела -> 400
+POST {{delivery}}/api/deliveries
+Content-Type: application/json
+
+{ }
+
+### Запрещённый переход CREATED -> DELIVERED -> 409
+PUT {{delivery}}/api/deliveries/4
+Content-Type: application/json
+
+{ "courier": "Орлов Игорь", "price": 199, "status": "DELIVERED" }
+
+### Поток для несуществующей доставки -> событие error
+GET {{delivery}}/api/deliveries/999/stream
+Accept: text/event-stream
+
+### ---------- Order Service (функциональные эндпоинты) ----------
+GET {{orders}}/api/orders
+
+### Заказы по статусам
+GET {{orders}}/api/orders?status=ASSEMBLY&status=DELIVERY
+
+### Заказ по id
+GET {{orders}}/api/orders/1

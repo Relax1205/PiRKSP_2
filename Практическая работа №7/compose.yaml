@@ -1,0 +1,46 @@
+# Запуск обоих сервисов одной командой:  docker compose up --build
+name: webflux-delivery
+
+services:
+
+  # ---------- Order Service: заказы (WebFlux, функциональные эндпоинты) ----------
+  order-service:
+    build: ./order-service
+    image: baas/order-service-webflux:1.0
+    environment:
+      SERVER_PORT: 8091
+      ORDER_RESPONSE_DELAY: 300ms
+      TZ: Europe/Moscow
+    ports:
+      - "8091:8091"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 3s
+    restart: unless-stopped
+
+  # ---------- Delivery Service: реактивный API доставок, SSE, WebClient ----------
+  delivery-service:
+    build: ./delivery-service
+    image: baas/delivery-service-webflux:1.0
+    environment:
+      SERVER_PORT: 8090
+      ORDER_SERVICE_URL: http://order-service:8091
+      DELIVERY_SIMULATION_STEP: 2s
+      TZ: Europe/Moscow
+    ports:
+      - "8090:8090"
+    depends_on:
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 3s
+    restart: unless-stopped

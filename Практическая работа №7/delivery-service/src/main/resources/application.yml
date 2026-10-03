@@ -1,0 +1,37 @@
+server:
+  port: ${SERVER_PORT:8090}
+  shutdown: graceful
+
+spring:
+  application:
+    name: delivery-service
+  webflux:
+    problemdetails:
+      enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Подключение к Order Service (WebClient). В Docker адрес приходит из compose.yaml.
+order-service:
+  url: ${ORDER_SERVICE_URL:http://localhost:8091}
+  connect-timeout: ${ORDER_SERVICE_CONNECT_TIMEOUT:2s}
+  response-timeout: ${ORDER_SERVICE_RESPONSE_TIMEOUT:3s}
+  retries: ${ORDER_SERVICE_RETRIES:2}
+
+delivery:
+  base-cost: ${DELIVERY_BASE_COST:199}
+  free-threshold: ${DELIVERY_FREE_THRESHOLD:1500}
+  simulation:
+    step: ${DELIVERY_SIMULATION_STEP:2s}
+    default-courier: ${DELIVERY_DEFAULT_COURIER:Смирнов Алексей}
