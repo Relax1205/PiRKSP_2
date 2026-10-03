@@ -1,0 +1,66 @@
+# Все параметры окружения берутся из переменных окружения (см. compose.yaml и .env).
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: supplier-service
+  # Своя БД suppliers_db — другие сервисы к ней доступа не имеют
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+  mvc:
+    problemdetails:
+      enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    # События передаются строкой с JSON: сервисы не делят между собой Java-классы
+    consumer:
+      group-id: supplier-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      # Смещение фиксируется после обработки каждого сообщения
+      ack-mode: record
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+
+app:
+  seed-demo-data: ${SEED_DEMO_DATA:true}
+  kafka:
+    order-events-topic: ${ORDER_EVENTS_TOPIC:order-events}
+
+logging:
+  pattern:
+    # [requestId] — идентификатор запроса (X-Request-ID), по нему запрос ищется в логах всех сервисов
+    console: "%d{HH:mm:ss.SSS} %5p [%X{requestId:--}] [%15.15t] %-22logger{0} : %m%n"
+  level:
+    org.apache.kafka: WARN
+    # пока Kafka недоступна, клиент пишет предупреждение о соединении несколько раз в секунду
+    org.apache.kafka.clients.NetworkClient: ERROR

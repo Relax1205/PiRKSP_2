@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Поставки и доставка — ПР №8</title>
+    <style>
+        :root {
+            --bg: #f3f5f8; --card: #fff; --text: #1f2933; --muted: #6b7785; --line: #e3e8ee;
+            --accent: #2f6fdb; --accent-text: #fff; --code-bg: #1e2430; --code-text: #d7dde6;
+            --up: #1d8a4e; --down: #c9372c; --warn: #b7791f; --info: #2f6fdb;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #12161c; --card: #1b2129; --text: #e4e9ef; --muted: #8c98a6; --line: #2b333d;
+                --accent: #4c8bf5; --code-bg: #0d1117; --code-text: #c9d1d9;
+                --up: #3fb26f; --down: #f0605a; --warn: #e0a43a; --info: #6aa1ff;
+            }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 20px; background: var(--bg); color: var(--text);
+               font: 14px/1.45 "Segoe UI", system-ui, -apple-system, Arial, sans-serif; }
+        h1 { font-size: 21px; margin: 0; }
+        .sub { color: var(--muted); margin: 4px 0 16px; }
+        .sub a { color: var(--accent); }
+        .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .wide { grid-column: 1 / -1; }
+        @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+        .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+        .card h2 { font-size: 15px; margin: 0 0 10px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+        .card h2 code { font-size: 12px; color: var(--muted); font-weight: normal; }
+        .card h2 button { font-size: 12px; padding: 2px 10px; margin-left: auto; }
+        a { color: var(--accent); }
+        td.items { white-space: nowrap; }
+        td.reason { min-width: 260px; }
+        .scroll { overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; font-size: 13px; }
+        th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { color: var(--muted); font-weight: 600; }
+        td.num { text-align: right; white-space: nowrap; }
+        label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 3px; }
+        input, select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+                        background: var(--card); color: var(--text); font: inherit; }
+        .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+        .row select { flex: 1; } .row input { width: 80px; flex: none; }
+        button { padding: 6px 12px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
+                 border-radius: 6px; cursor: pointer; font: inherit; }
+        button.secondary { background: transparent; color: var(--accent); }
+        button:disabled { opacity: .5; cursor: default; }
+        .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+        pre { background: var(--code-bg); color: var(--code-text); padding: 10px; border-radius: 6px; font-size: 12px;
+              white-space: pre-wrap; word-break: break-word; margin: 10px 0 0; max-height: 260px; overflow: auto; }
+        .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600;
+                 border: 1px solid currentColor; white-space: nowrap; }
+        .UP, .DELIVERED, .CONFIRMED, .CLOSED { color: var(--up); }
+        .DOWN, .REJECTED, .CANCELLED, .OPEN, .error { color: var(--down); }
+        .HALF_OPEN, .COURIER_ASSIGNED, .IN_TRANSIT, .UNKNOWN { color: var(--warn); }
+        .CREATED, .DELIVERY_CREATED, .ACCEPTED, .SSE { color: var(--info); }
+        .muted { color: var(--muted); }
+        #timeline { list-style: none; margin: 10px 0 0; padding: 0; font-size: 13px; }
+        #timeline li { display: grid; grid-template-columns: 92px 150px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+        #timeline li .time { color: var(--muted); font-family: Consolas, monospace; }
+        .result { margin-top: 10px; font-size: 13px; }
+    </style>
+</head>
+<body>
+<h1>Поставщики и доставка — микросервисная система</h1>
+<div class="sub">
+    Client → Traefik → API Gateway → Supplier / Order / Delivery Service · Kafka · SSE ·
+    <a href="http://localhost:8081/dashboard/" target="_blank">Traefik</a> ·
+    <a href="http://localhost:8082/" target="_blank">Kafka UI</a> ·
+    <a href="/actuator/health/system" target="_blank">health JSON</a>
+</div>
+
+<div class="grid">
+    <div class="card wide">
+        <h2>Состояние системы <code>GET /actuator/health/system — обновляется каждые 3 с</code></h2>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>Компонент</th><th>Статус</th><th>БД</th><th>Kafka</th><th>Circuit breaker</th><th>Ответ</th><th>Подробности</th></tr></thead>
+                <tbody id="health"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Новый заказ <code>POST /api/orders</code></h2>
+        <label for="customer">Получатель</label>
+        <input id="customer" value="Петрова Анна">
+        <label for="address">Адрес доставки</label>
+        <input id="address" value="г. Москва, Ленинский проспект, д. 30к2, кв. 117">
+        <label for="comment">Комментарий</label>
+        <input id="comment" value="Домофон не работает">
+        <label>Товары (цены и наличие проверяет Supplier Service)</label>
+        <div id="items"></div>
+        <div class="actions">
+            <button class="secondary" onclick="addItem()">+ товар</button>
+            <button id="createBtn" onclick="createOrder()">Оформить заказ</button>
+        </div>
+        <div id="createResult" class="result"></div>
+    </div>
+
+    <div class="card">
+        <h2>Статус заказа <code>GET /api/orders/{id}/events — SSE, Flux</code></h2>
+        <div class="row">
+            <input id="orderId" placeholder="№ заказа" style="width:110px">
+            <button onclick="subscribe(document.getElementById('orderId').value)">Подписаться</button>
+            <button class="secondary" onclick="unsubscribe('подписка закрыта клиентом')">Отписаться</button>
+        </div>
+        <ul id="timeline"></ul>
+    </div>
+
+    <div class="card wide">
+        <h2>Заказы <code>GET /api/orders — Order Service</code>
+            <button class="secondary" onclick="loadOrders()">Обновить</button></h2>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>№</th><th>Статус</th><th>Получатель</th><th>Товары</th><th>Сумма</th><th>Доставка</th><th>Курьер</th><th>Причина</th></tr></thead>
+                <tbody id="orders"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Каталог <code>GET /api/products — Supplier Service</code>
+            <button class="secondary" onclick="loadProducts()">Обновить</button></h2>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>№</th><th>Товар</th><th>Поставщик</th><th>Цена</th><th>Остаток</th></tr></thead>
+                <tbody id="products"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Доставки <code>GET /api/deliveries — Delivery Service</code>
+            <button class="secondary" onclick="loadDeliveries()">Обновить</button></h2>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>№</th><th>Заказ</th><th>Статус</th><th>Курьер</th><th>Стоимость</th></tr></thead>
+                <tbody id="deliveries"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const FINAL = ['DELIVERED', 'REJECTED', 'CANCELLED'];
+    const STATUSES = ['CREATED', 'CONFIRMED', 'DELIVERY_CREATED', 'COURIER_ASSIGNED', 'IN_TRANSIT', ...FINAL];
+    let products = [];
+    let source = null;
+
+    const $ = id => document.getElementById(id);
+    const esc = v => String(v ?? '—').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+    const badge = s => s ? `<span class="badge ${esc(s)}">${esc(s)}</span>` : '<span class="muted">—</span>';
+    const money = v => v == null ? '—' : Number(v).toLocaleString('ru-RU', {minimumFractionDigits: 2}) + ' ₽';
+    const now = () => new Date().toLocaleTimeString('ru-RU') + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+    const newRequestId = () => 'web-' + Math.random().toString(16).slice(2, 10);
+
+    /** Каждый запрос со своим X-Request-ID — по нему действие видно в логах всех сервисов. */
+    async function api(method, url, body) {
+        const requestId = newRequestId();
+        const started = performance.now();
+        const response = await fetch(url, {
+            method,
+            headers: {'Content-Type': 'application/json', 'X-Request-ID': requestId},
+            body: body ? JSON.stringify(body) : undefined
+        });
+        const text = await response.text();
+        return {
+            status: response.status,
+            requestId: response.headers.get('X-Request-ID') || requestId,
+            ms: Math.round(performance.now() - started),
+            body: text ? JSON.parse(text) : null
+        };
+    }
+
+    // ---------- Состояние системы ----------
+    async function loadHealth() {
+        const rows = [['Traefik', 'UP', {details: 'страница получена через Traefik'}],
+                      ['API Gateway', 'UP', {details: 'отвечает'}]];
+        try {
+            const response = await fetch('/actuator/health/system', {cache: 'no-store'});
+            const health = await response.json();
+            const names = {orderService: 'Order Service', supplierService: 'Supplier Service', deliveryService: 'Delivery Service'};
+            for (const [key, title] of Object.entries(names)) {
+                const c = health.components?.[key] ?? {status: 'UNKNOWN', details: {}};
+                rows.push([title, c.status, c.details ?? {}]);
+            }
+        } catch (e) {
+            rows[1] = ['API Gateway', 'DOWN', {error: 'нет ответа: ' + e.message}];
+        }
+        $('health').innerHTML = rows.map(([name, status, d]) => {
+            const cb = d.circuitBreakers ? d.circuitBreakers.replace(/(CLOSED|HALF_OPEN|OPEN)/g, '<span class="$1">$1</span>') : '—';
+            return `<tr><td>${esc(name)}</td><td>${badge(status)}</td><td>${badge(d.db ?? d.r2dbc)}</td>` +
+                `<td>${badge(d.kafka)}</td><td>${cb}</td>` +
+                `<td class="num">${d.responseTimeMs != null ? d.responseTimeMs + ' мс' : '—'}</td>` +
+                `<td class="muted">${esc(d.error ?? d.details ?? d.url)}</td></tr>`;
+        }).join('');
+    }
+
+    // ---------- Каталог и форма заказа ----------
+    async function loadProducts() {
+        const r = await api('GET', '/api/products');
+        if (r.status !== 200) {
+            $('products').innerHTML = `<tr><td colspan="5" class="DOWN">HTTP ${r.status}: ${esc(r.body?.detail)}</td></tr>`;
+            return;
+        }
+        products = r.body;
+        $('products').innerHTML = products.map(p =>
+            `<tr><td>${p.id}</td><td>${esc(p.name)}</td><td>${esc(p.supplier.name)}</td>` +
+            `<td class="num">${money(p.price)}</td><td class="num ${p.stock > 0 ? '' : 'DOWN'}">${p.stock}</td></tr>`).join('');
+        if (!$('items').children.length) {
+            addItem(5, 1);
+            addItem(4, 1);
+        }
+    }
+
+    function addItem(productId = 1, quantity = 1) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        const options = (products.length ? products : [{id: productId, name: 'товар ' + productId, price: 0}])
+            .map(p => `<option value="${p.id}" ${p.id === productId ? 'selected' : ''}>${p.id}. ${esc(p.name)} — ${money(p.price)}</option>`)
+            .join('');
+        row.innerHTML = `<select>${options}</select><input type="number" min="1" value="${quantity}">` +
+            `<button class="secondary" title="Убрать" onclick="this.parentElement.remove()">✕</button>`;
+        $('items').appendChild(row);
+    }
+
+    async function createOrder() {
+        const items = [...$('items').children].map(row => ({
+            productId: Number(row.querySelector('select').value),
+            quantity: Number(row.querySelector('input').value)
+        }));
+        $('createBtn').disabled = true;
+        try {
+            const r = await api('POST', '/api/orders', {
+                customerName: $('customer').value, deliveryAddress: $('address').value,
+                comment: $('comment').value, items
+            });
+            const ok = r.status === 201;
+            $('createResult').innerHTML =
+                `<div>${badge(ok ? r.body.status : 'error')} HTTP ${r.status} за ${r.ms} мс · X-Request-ID: <b>${esc(r.requestId)}</b></div>` +
+                (ok ? '' : `<div class="DOWN" style="margin-top:6px">${esc(r.body?.detail)}</div>`) +
+                `<pre>${esc(JSON.stringify(r.body, null, 2))}</pre>`;
+            const orderId = r.body?.id ?? r.body?.orderId;
+            if (orderId) {
+                subscribe(orderId);
+            }
+            loadOrders();
+        } finally {
+            $('createBtn').disabled = false;
+        }
+    }
+
+    // ---------- SSE ----------
+    function addEvent(type, details) {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="time">${now()}</span><span>${badge(type)}</span><span>${esc(details)}</span>`;
+        $('timeline').appendChild(li);
+    }
+
+    function subscribe(orderId) {
+        if (!orderId) return;
+        unsubscribe();
+        $('orderId').value = orderId;
+        $('timeline').innerHTML = '';
+        source = new EventSource(`/api/orders/${orderId}/events`);
+        addEvent('SSE', `подписка на заказ ${orderId}`);
+        STATUSES.forEach(type => source.addEventListener(type, e => {
+            const event = JSON.parse(e.data);
+            addEvent(type, `${event.details} · на сервере ${event.at.slice(11)} · id ${e.lastEventId}`);
+            loadOrders();
+            loadDeliveries();
+            if (FINAL.includes(type)) {
+                loadProducts();
+                unsubscribe('сервер закрыл поток — конечный статус');
+            }
+        }));
+        source.addEventListener('error', e => {
+            if (e.data) {
+                addEvent('error', JSON.parse(e.data).detail);
+                unsubscribe();
+            }
+        });
+    }
+
+    function unsubscribe(reason) {
+        if (source) {
+            source.close();   // иначе EventSource переподключится сам
+            source = null;
+            if (reason) addEvent('SSE', reason);
+        }
+    }
+
+    // ---------- Заказы и доставки ----------
+    async function loadOrders() {
+        const r = await api('GET', '/api/orders');
+        if (r.status !== 200) {
+            $('orders').innerHTML = `<tr><td colspan="8" class="DOWN">HTTP ${r.status}: ${esc(r.body?.detail)}</td></tr>`;
+            return;
+        }
+        $('orders').innerHTML = r.body.slice(0, 12).map(o =>
+            `<tr><td><a href="#" onclick="subscribe(${o.id}); return false">${o.id}</a></td><td>${badge(o.status)}</td>` +
+            `<td>${esc(o.customerName)}</td><td class="items">${o.items.map(i => esc(i.productName ?? productName(i.productId)) + ' × ' + i.quantity).join('<br>')}</td>` +
+            `<td class="num">${money(o.total)}</td><td>${o.deliveryId ?? '—'}</td><td>${esc(o.courier)}</td>` +
+            `<td class="muted reason">${esc(o.statusReason ?? '')}</td></tr>`).join('');
+    }
+
+    function productName(id) {
+        return products.find(p => p.id === id)?.name ?? 'товар ' + id;
+    }
+
+    async function loadDeliveries() {
+        const r = await api('GET', '/api/deliveries');
+        if (r.status !== 200) {
+            $('deliveries').innerHTML = `<tr><td colspan="5" class="DOWN">HTTP ${r.status}: ${esc(r.body?.detail)}</td></tr>`;
+            return;
+        }
+        $('deliveries').innerHTML = r.body.slice(0, 12).map(d =>
+            `<tr><td>${d.id}</td><td>${d.orderId}</td><td>${badge(d.status)}</td><td>${esc(d.courier)}</td>` +
+            `<td class="num">${money(d.price)}</td></tr>`).join('');
+    }
+
+    loadHealth();
+    setInterval(loadHealth, 3000);
+    loadProducts().then(loadOrders).then(loadDeliveries);
+    // http://localhost:8000/#order=1 — сразу подписаться на заказ 1
+    const linked = location.hash.match(/order=(\d+)/);
+    if (linked) subscribe(linked[1]);
+</script>
+</body>
+</html>

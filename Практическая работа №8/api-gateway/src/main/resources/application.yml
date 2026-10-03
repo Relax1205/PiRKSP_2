@@ -1,0 +1,102 @@
+# Все параметры окружения берутся из переменных окружения (см. compose.yaml и .env).
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+services:
+  order-service: ${ORDER_SERVICE_URL:http://order-service:8080}
+  supplier-service: ${SUPPLIER_SERVICE_URL:http://supplier-service:8080}
+  delivery-service: ${DELIVERY_SERVICE_URL:http://delivery-service:8080}
+
+spring:
+  application:
+    name: api-gateway
+  reactor:
+    context-propagation: auto
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 2000   # мс
+            response-timeout: 15s   # по умолчанию; дольше, чем Order Service ждёт Supplier Service со всеми повторами
+          routes:
+            # SSE-поток заказа: отдельный маршрут без таймаута ответа и без circuit breaker,
+            # иначе длинный поток оборвался бы по таймауту
+            - id: order-events
+              uri: ${services.order-service}
+              predicates:
+                - Path=/api/orders/*/events
+              metadata:
+                response-timeout: -1
+            - id: orders
+              uri: ${services.order-service}
+              predicates:
+                - Path=/api/orders/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: orderService
+                    fallbackUri: forward:/fallback/order-service
+            - id: deliveries
+              uri: ${services.delivery-service}
+              predicates:
+                - Path=/api/deliveries/**
+              metadata:
+                response-timeout: 5000   # мс: чтение доставок — быстрый запрос
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: deliveryService
+                    fallbackUri: forward:/fallback/delivery-service
+            - id: suppliers
+              uri: ${services.supplier-service}
+              predicates:
+                - Path=/api/suppliers/**,/api/products/**
+              metadata:
+                response-timeout: 5000   # мс: чтение каталога — быстрый запрос
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: supplierService
+                    fallbackUri: forward:/fallback/supplier-service
+
+# Circuit breaker маршрутов: сервис не отвечает 5 раз подряд из 10 — 10 секунд ответ
+# сразу из fallback, без попытки соединения
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 2
+        automatic-transition-from-open-to-half-open-enabled: true
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 20s   # верхняя граница; основной таймаут — response-timeout выше
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  endpoint:
+    gateway:
+      access: read-only
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        # /actuator/health/system — какие сервисы системы доступны прямо сейчас
+        system:
+          include: orderService,supplierService,deliveryService
+          show-details: always
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %5p [%X{requestId:--}] [%15.15t] %-22logger{0} : %m%n"

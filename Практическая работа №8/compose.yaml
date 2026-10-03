@@ -1,0 +1,285 @@
+# Вся система одной командой:  docker compose up --build
+#
+#   Client → Traefik (:8000) → API Gateway → Order / Supplier / Delivery Service
+#   у каждого сервиса своя PostgreSQL; события — через Kafka
+name: msa-delivery
+
+# Одинаковая проверка готовности для всех Spring Boot-сервисов (Actuator)
+x-spring-healthcheck: &spring-healthcheck
+  test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 90s
+  start_interval: 3s
+
+x-postgres-healthcheck: &postgres-healthcheck
+  test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+  interval: 5s
+  timeout: 3s
+  retries: 10
+
+services:
+
+  # ---------- Внешний reverse proxy (как в ПР №5): инфраструктурная маршрутизация ----------
+  traefik:
+    image: traefik:v3.6
+    command:
+      - --entrypoints.web.address=:80
+      - --providers.docker=true
+      # Публикуются только контейнеры с меткой traefik.enable=true (здесь — только API Gateway)
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=msa-edge
+      # Только контейнеры этого проекта: метки параллельно запущенной ПР №5 не мешают
+      - --providers.docker.constraints=Label(`com.docker.compose.project`,`msa-delivery`)
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --ping=true
+      - --log.level=INFO
+      # Журнал запросов (JSON) с заголовком X-Request-Id, если его прислал клиент
+      - --accesslog=true
+      - --accesslog.format=json
+      - --accesslog.fields.defaultmode=drop
+      - --accesslog.fields.names.RequestMethod=keep
+      - --accesslog.fields.names.RequestPath=keep
+      - --accesslog.fields.names.DownstreamStatus=keep
+      - --accesslog.fields.names.Duration=keep
+      - --accesslog.fields.names.RouterName=keep
+      - --accesslog.fields.headers.defaultmode=drop
+      - --accesslog.fields.headers.names.X-Request-Id=keep
+    ports:
+      - "${HTTP_PORT:-8000}:80"
+      - "${TRAEFIK_DASHBOARD_PORT:-8081}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------- API Gateway: единая точка входа, маршрутизация внутри приложения ----------
+  api-gateway:
+    build: ./api-gateway
+    image: msa/api-gateway:1.0
+    environment:
+      ORDER_SERVICE_URL: http://order-service:8080
+      SUPPLIER_SERVICE_URL: http://supplier-service:8080
+      DELIVERY_SERVICE_URL: http://delivery-service:8080
+      TZ: ${TZ:-Europe/Moscow}
+    networks:
+      - edge
+      - backend
+    depends_on:
+      order-service:
+        condition: service_healthy
+      supplier-service:
+        condition: service_healthy
+      delivery-service:
+        condition: service_healthy
+    healthcheck: *spring-healthcheck
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.msa-gateway.entrypoints=web
+      - traefik.http.routers.msa-gateway.rule=PathPrefix(`/`)
+      - traefik.http.routers.msa-gateway.service=msa-gateway
+      - traefik.http.services.msa-gateway.loadbalancer.server.port=8080
+      - traefik.http.services.msa-gateway.loadbalancer.healthcheck.path=/actuator/health/readiness
+      - traefik.http.services.msa-gateway.loadbalancer.healthcheck.interval=5s
+      - traefik.http.services.msa-gateway.loadbalancer.healthcheck.timeout=2s
+    restart: unless-stopped
+
+  # ---------- Supplier Service: поставщики, товары, остатки ----------
+  supplier-service:
+    build: ./supplier-service
+    image: msa/supplier-service:1.0
+    environment:
+      DB_URL: jdbc:postgresql://suppliers-db:5432/${SUPPLIERS_DB}
+      DB_USERNAME: ${SUPPLIERS_DB_USER}
+      DB_PASSWORD: ${SUPPLIERS_DB_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TZ: ${TZ:-Europe/Moscow}
+    networks:
+      - backend
+      - suppliers-data
+    depends_on:
+      suppliers-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck: *spring-healthcheck
+    restart: unless-stopped
+
+  # ---------- Order Service: заказы (WebFlux, R2DBC, SSE) ----------
+  order-service:
+    build: ./order-service
+    image: msa/order-service:1.0
+    environment:
+      DB_URL: r2dbc:postgresql://orders-db:5432/${ORDERS_DB}
+      DB_USERNAME: ${ORDERS_DB_USER}
+      DB_PASSWORD: ${ORDERS_DB_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SUPPLIER_SERVICE_URL: http://supplier-service:8080
+      SUPPLIER_TIMEOUT: ${SUPPLIER_TIMEOUT:-2s}
+      SUPPLIER_RETRY_ATTEMPTS: ${SUPPLIER_RETRY_ATTEMPTS:-3}
+      SUPPLIER_CB_OPEN_STATE: ${SUPPLIER_CB_OPEN_STATE:-15s}
+      TZ: ${TZ:-Europe/Moscow}
+    networks:
+      - backend
+      - orders-data
+    depends_on:
+      orders-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck: *spring-healthcheck
+    restart: unless-stopped
+
+  # ---------- Delivery Service: доставки, имитация курьера ----------
+  delivery-service:
+    build: ./delivery-service
+    image: msa/delivery-service:1.0
+    environment:
+      DB_URL: jdbc:postgresql://deliveries-db:5432/${DELIVERIES_DB}
+      DB_USERNAME: ${DELIVERIES_DB_USER}
+      DB_PASSWORD: ${DELIVERIES_DB_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DELIVERY_BASE_COST: ${DELIVERY_BASE_COST:-199}
+      DELIVERY_FREE_THRESHOLD: ${DELIVERY_FREE_THRESHOLD:-1500}
+      COURIER_STEP: ${COURIER_STEP:-4s}
+      TZ: ${TZ:-Europe/Moscow}
+    networks:
+      - backend
+      - deliveries-data
+    depends_on:
+      deliveries-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck: *spring-healthcheck
+    restart: unless-stopped
+
+  # ---------- Базы данных: у каждого сервиса своя ----------
+  suppliers-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${SUPPLIERS_DB}
+      POSTGRES_USER: ${SUPPLIERS_DB_USER}
+      POSTGRES_PASSWORD: ${SUPPLIERS_DB_PASSWORD}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - suppliers-db-data:/var/lib/postgresql/data
+    networks:
+      - suppliers-data
+    healthcheck: *postgres-healthcheck
+    restart: unless-stopped
+
+  orders-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${ORDERS_DB}
+      POSTGRES_USER: ${ORDERS_DB_USER}
+      POSTGRES_PASSWORD: ${ORDERS_DB_PASSWORD}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - orders-db-data:/var/lib/postgresql/data
+    networks:
+      - orders-data
+    healthcheck: *postgres-healthcheck
+    restart: unless-stopped
+
+  deliveries-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DELIVERIES_DB}
+      POSTGRES_USER: ${DELIVERIES_DB_USER}
+      POSTGRES_PASSWORD: ${DELIVERIES_DB_PASSWORD}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - deliveries-db-data:/var/lib/postgresql/data
+    networks:
+      - deliveries-data
+    healthcheck: *postgres-healthcheck
+    restart: unless-stopped
+
+  # ---------- Брокер сообщений: Apache Kafka в режиме KRaft (без ZooKeeper) ----------
+  kafka:
+    image: apache/kafka:3.9.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      # Топики создают сами сервисы (NewTopic), случайных топиков с опечатками не будет
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 30s
+      start_interval: 5s
+    restart: unless-stopped
+
+  # ---------- Веб-интерфейс Kafka: топики, сообщения, группы потребителей ----------
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    environment:
+      KAFKA_CLUSTERS_0_NAME: msa-delivery
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+      TZ: ${TZ:-Europe/Moscow}
+    ports:
+      - "${KAFKA_UI_PORT:-8082}:8080"
+    networks:
+      - edge
+      - backend
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  # Внешний контур: Traefik ↔ API Gateway (и Kafka UI для доступа с хоста)
+  edge:
+    name: msa-edge
+  # Внутренний контур без выхода наружу: Gateway ↔ сервисы ↔ Kafka
+  backend:
+    name: msa-backend
+    internal: true
+  # Сеть «сервис ↔ его БД»: чужой сервис до этой БД физически не дотянется
+  suppliers-data:
+    name: msa-suppliers-data
+    internal: true
+  orders-data:
+    name: msa-orders-data
+    internal: true
+  deliveries-data:
+    name: msa-deliveries-data
+    internal: true
+
+volumes:
+  suppliers-db-data:
+  orders-db-data:
+  deliveries-db-data:
+  kafka-data:

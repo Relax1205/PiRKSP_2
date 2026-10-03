@@ -1,0 +1,112 @@
+# Все параметры окружения берутся из переменных окружения (см. compose.yaml и .env).
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: order-service
+  # Своя БД orders_db, реактивный драйвер R2DBC — запросы к БД не блокируют event loop
+  r2dbc:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  sql:
+    init:
+      mode: always   # schema.sql: CREATE TABLE IF NOT EXISTS ...
+  webflux:
+    problemdetails:
+      enabled: true
+  reactor:
+    # X-Request-ID из Reactor Context автоматически попадает в MDC (логи)
+    context-propagation: auto
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: order-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        # Если Kafka недоступна — быстро получить ошибку, событие останется в outbox
+        max.block.ms: 3000
+        request.timeout.ms: 3000
+        delivery.timeout.ms: 10000
+    listener:
+      ack-mode: record
+
+# Синхронный вызов Supplier Service (WebClient)
+supplier-service:
+  url: ${SUPPLIER_SERVICE_URL:http://supplier-service:8080}
+  connect-timeout: ${SUPPLIER_CONNECT_TIMEOUT:1s}
+
+# Защита вызова Supplier Service: таймаут на попытку, повторы, circuit breaker
+resilience4j:
+  timelimiter:
+    instances:
+      supplierService:
+        timeout-duration: ${SUPPLIER_TIMEOUT:2s}
+        cancel-running-future: true
+  retry:
+    instances:
+      supplierService:
+        max-attempts: ${SUPPLIER_RETRY_ATTEMPTS:3}   # 1 запрос + 2 повтора
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2             # паузы 200 мс, 400 мс
+        retry-exception-predicate: baas.orders.client.SupplierFailurePredicate
+  circuitbreaker:
+    instances:
+      supplierService:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 4
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: ${SUPPLIER_CB_OPEN_STATE:15s}
+        permitted-number-of-calls-in-half-open-state: 2
+        automatic-transition-from-open-to-half-open-enabled: true
+        record-failure-predicate: baas.orders.client.SupplierFailurePredicate
+        register-health-indicator: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,circuitbreakers,circuitbreakerevents
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        # Docker и API Gateway считают сервис готовым, если он запущен и есть связь с БД.
+        # Недоступность Supplier Service или Kafka не делает Order Service «нездоровым».
+        readiness:
+          include: readinessState,r2dbc
+  health:
+    circuitbreakers:
+      enabled: true
+
+app:
+  kafka:
+    order-events-topic: ${ORDER_EVENTS_TOPIC:order-events}
+    delivery-events-topic: ${DELIVERY_EVENTS_TOPIC:delivery-events}
+  outbox:
+    poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
+  sse:
+    keep-alive: 15s
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %5p [%X{requestId:--}] [%15.15t] %-22logger{0} : %m%n"
+  level:
+    org.apache.kafka: WARN
+    # пока Kafka недоступна, клиент пишет предупреждение о соединении несколько раз в секунду
+    org.apache.kafka.clients.NetworkClient: ERROR

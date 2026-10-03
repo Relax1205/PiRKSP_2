@@ -1,0 +1,101 @@
+### Запросы для VS Code (REST Client) или IntelliJ IDEA (HTTP Client).
+### Всё идёт через Traefik (порт 8000) → API Gateway. Сервисы наружу не опубликованы.
+@host = http://localhost:8000
+
+### ---------- Состояние системы ----------
+### Какие сервисы доступны прямо сейчас (API Gateway опрашивает их /actuator/health)
+GET {{host}}/actuator/health/system
+
+### Маршруты API Gateway
+GET {{host}}/actuator/gateway/routes
+
+### ---------- Supplier Service: поставщики и товары ----------
+### Каталог: цены и остатки
+GET {{host}}/api/products
+
+### Выбранные товары — тот же запрос делает Order Service при проверке наличия
+GET {{host}}/api/products?ids=5,4
+
+### Поставщики с их товарами
+GET {{host}}/api/suppliers
+
+### Один поставщик
+GET {{host}}/api/suppliers/4
+
+### ---------- Order Service: заказы ----------
+### Создать заказ: Order Service → Supplier Service (проверка) → CONFIRMED → OrderCreated в Kafka.
+### X-Request-ID можно задать самому — по нему запрос ищется в логах всех сервисов
+POST {{host}}/api/orders
+Content-Type: application/json
+X-Request-ID: http-demo-1
+
+{
+  "customerName": "Петрова Анна",
+  "deliveryAddress": "г. Москва, Ленинский проспект, д. 30к2, кв. 117",
+  "comment": "Домофон не работает",
+  "items": [
+    { "productId": 5, "quantity": 1 },
+    { "productId": 4, "quantity": 1 }
+  ]
+}
+
+### Поток статусов заказа (SSE): CREATED → CONFIRMED → DELIVERY_CREATED → COURIER_ASSIGNED → IN_TRANSIT → DELIVERED
+GET {{host}}/api/orders/1/events
+Accept: text/event-stream
+
+### Заказ с позициями, ценами, курьером
+GET {{host}}/api/orders/1
+
+### История статусов обычным JSON
+GET {{host}}/api/orders/1/history
+
+### Все заказы / фильтр по статусу
+GET {{host}}/api/orders?status=DELIVERED
+
+### Идемпотентность: отправить в Kafka то же событие OrderCreated ещё раз (тот же eventId).
+### Delivery Service и Supplier Service его пропустят — доставка и списание не повторятся
+POST {{host}}/api/orders/1/republish
+
+### ---------- Delivery Service: доставки ----------
+### Все доставки
+GET {{host}}/api/deliveries
+
+### Доставка конкретного заказа
+GET {{host}}/api/deliveries?orderId=1
+
+### Одна доставка
+GET {{host}}/api/deliveries/1
+
+### ---------- Ошибки ----------
+### Товара нет в наличии -> 409, заказ REJECTED
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{
+  "customerName": "Иванов Иван",
+  "deliveryAddress": "г. Москва, Тверская, д. 12, кв. 45",
+  "items": [ { "productId": 6, "quantity": 1 } ]
+}
+
+### Товара нет в каталоге -> 422, заказ REJECTED
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{
+  "customerName": "Иванов Иван",
+  "deliveryAddress": "г. Москва, Тверская, д. 12, кв. 45",
+  "items": [ { "productId": 99, "quantity": 1 } ]
+}
+
+### Невалидный запрос -> 400
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{ "customerName": "", "items": [ { "productId": 1, "quantity": 0 } ] }
+
+### Нет заказа -> 404
+GET {{host}}/api/orders/999
+
+### SSE для несуществующего заказа -> событие error
+GET {{host}}/api/orders/999/events
+Accept: text/event-stream

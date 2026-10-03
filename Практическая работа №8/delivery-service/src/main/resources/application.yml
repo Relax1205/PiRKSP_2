@@ -1,0 +1,87 @@
+# Все параметры окружения берутся из переменных окружения (см. compose.yaml и .env).
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: delivery-service
+  # Своя БД deliveries_db — другие сервисы к ней доступа не имеют
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+  mvc:
+    problemdetails:
+      enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: delivery-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        # Если Kafka недоступна — быстро получить ошибку, событие останется в outbox
+        max.block.ms: 3000
+        request.timeout.ms: 3000
+        delivery.timeout.ms: 10000
+    listener:
+      ack-mode: record
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+
+app:
+  kafka:
+    order-events-topic: ${ORDER_EVENTS_TOPIC:order-events}
+    delivery-events-topic: ${DELIVERY_EVENTS_TOPIC:delivery-events}
+  outbox:
+    poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:500}
+
+delivery:
+  # Тарифы из ПР №5: 199 ₽, бесплатно от 1500 ₽
+  base-cost: ${DELIVERY_BASE_COST:199}
+  free-threshold: ${DELIVERY_FREE_THRESHOLD:1500}
+  courier:
+    # Имитация курьера: CREATED -> ACCEPTED -> IN_TRANSIT -> DELIVERED, шаг раз в step
+    simulation: ${COURIER_SIMULATION:true}
+    step: ${COURIER_STEP:4s}
+    poll-interval-ms: 1000
+    names: ${COURIER_NAMES:Кузнецов Дмитрий,Смирнов Алексей,Орлов Игорь}
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %5p [%X{requestId:--}] [%15.15t] %-22logger{0} : %m%n"
+  level:
+    org.apache.kafka: WARN
+    # пока Kafka недоступна, клиент пишет предупреждение о соединении несколько раз в секунду
+    org.apache.kafka.clients.NetworkClient: ERROR
+    # ddl-auto: update при создании уникальных ограничений пишет безвредное «constraint ... does not exist, skipping»
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: ERROR
