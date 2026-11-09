@@ -11,6 +11,9 @@ services:
       - --providers.docker=true
       # Публикуются только контейнеры с меткой traefik.enable=true
       - --providers.docker.exposedbydefault=false
+      # Только контейнеры этого проекта: метки других запущенных compose-проектов
+      # (например, API Gateway из ПР №8 с правилом PathPrefix(`/`)) сюда не попадают
+      - --providers.docker.constraints=Label(`com.docker.compose.project`,`baas-delivery`)
       # Traefik ходит в сервисы через сеть edge
       - --providers.docker.network=baas-edge
       - --api.dashboard=true

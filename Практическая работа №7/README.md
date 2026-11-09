@@ -51,21 +51,21 @@ pattern matching в `instanceof`. Сборка идёт через **Maven**, н
 **Spring WebFlux** — реактивный веб-фреймворк Spring. Подключается стартером
 `spring-boot-starter-webflux` вместо `spring-boot-starter-web` из ПР №5.
 
-| | Spring MVC (ПР №5) | Spring WebFlux (ПР №7) |
-|---|---|---|
-| Сервер | Tomcat, Servlet API | **Reactor Netty**, без Servlet API |
-| Модель потоков | поток на каждый запрос: пока ждём БД или другой сервис, поток простаивает | несколько потоков event loop; ожидание не занимает поток |
-| Что возвращает контроллер | готовый объект: `DeliveryInfo`, `List<...>` | «обещание» результата: `Mono<Delivery>`, `Flux<Delivery>` |
-| HTTP-клиент | `RestClient` (блокирующий) | `WebClient` (неблокирующий) |
-| Потоковая передача | неудобно | `Flux` + `text/event-stream` из коробки |
+|                                                  | Spring MVC (ПР №5)                                                                                                                 | Spring WebFlux (ПР №7)                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Сервер                                     | Tomcat, Servlet API                                                                                                                   | **Reactor Netty**, без Servlet API                                                     |
+| Модель потоков                      | поток на каждый запрос: пока ждём БД или другой сервис, поток простаивает | несколько потоков event loop; ожидание не занимает поток |
+| Что возвращает контроллер | готовый объект: `DeliveryInfo`, `List<...>`                                                                          | «обещание» результата: `Mono<Delivery>`, `Flux<Delivery>`               |
+| HTTP-клиент                                | `RestClient` (блокирующий)                                                                                               | `WebClient` (неблокирующий)                                                      |
+| Потоковая передача              | неудобно                                                                                                                      | `Flux` + `text/event-stream` из коробки                                            |
 
 Используемые стартеры:
 
-| Стартер                          | Сервис   | Зачем                                                    |
-| -------------------------------- | -------- | -------------------------------------------------------- |
-| `spring-boot-starter-webflux`    | оба      | WebFlux, Reactor Netty, Jackson, WebClient               |
-| `spring-boot-starter-validation` | delivery | Bean Validation (`@NotNull`, `@Positive`...) тел запросов |
-| `spring-boot-starter-actuator`   | оба      | `/actuator/health` для healthcheck в Docker              |
+| Стартер                     | Сервис | Зачем                                                               |
+| ---------------------------------- | ------------ | ------------------------------------------------------------------------ |
+| `spring-boot-starter-webflux`    | оба       | WebFlux, Reactor Netty, Jackson, WebClient                               |
+| `spring-boot-starter-validation` | delivery     | Bean Validation (`@NotNull`, `@Positive`...) тел запросов |
+| `spring-boot-starter-actuator`   | оба       | `/actuator/health` для healthcheck в Docker                        |
 
 ### Reactor Netty и event loop
 
@@ -102,23 +102,23 @@ WebFlux, WebClient и RSocket (ПР №4).
 
 ### Операторы Project Reactor в проекте
 
-| Оператор                   | Где                                                      | Что делает                                                  |
-| -------------------------- | -------------------------------------------------------- | ----------------------------------------------------------- |
-| `map`                      | `create`: заказ → новая доставка; контроллер: доставка → `ResponseEntity`, событие → `ServerSentEvent` | синхронно преобразует элемент |
-| `filter`                   | `findAll` (фильтр по статусу); `create` (отменённый заказ); `watch` (события только нужной доставки); `simulate` | пропускает только подходящие элементы |
-| `flatMap`                  | `details`: доставка → запрос заказа через WebClient; `create`: заказ → сохранение; `update` | преобразует элемент в новый `Mono`/`Flux` (асинхронный шаг) |
-| `flatMapMany`              | `watch`: `Mono<Delivery>` → `Flux<DeliveryEvent>`        | из одного элемента делает поток                             |
-| `concatMap`                | `courierRoute`: смена статусов строго по очереди         | как `flatMap`, но с сохранением порядка                     |
-| `switchIfEmpty`            | `findById`, `delete` (нет доставки → 404); `create` (нет доставки на заказ → запрос в Order Service); Order Service: нет заказа → 404 | что делать, если данных нет |
-| `onErrorResume`            | `details` (Order Service недоступен → ответ без заказа); SSE-поток (ошибка → событие `error`); Order Service (неверный id → 400) | заменяет ошибку запасным результатом |
-| `onErrorMap`               | `OrderClient`: ошибка соединения → 503                   | превращает одну ошибку в другую                             |
-| `retryWhen(Retry.backoff)` | `OrderClient`: повтор запроса при сбое соединения        | повтор с нарастающей паузой                                  |
-| `delayElements`, `delayElement` | имитация курьера (пауза между статусами); задержка Order Service | задержка без блокировки потока (таймер)          |
-| `takeUntil`                | `watch`: поток заканчивается на финальном статусе        | завершает Flux после элемента, удовлетворяющего условию     |
-| `startWith`                | `watch`: сначала текущее состояние, потом изменения      | добавляет элементы в начало потока                          |
-| `index`                    | контроллер SSE: номер события → поле `id:`               | нумерует элементы                                           |
-| `then`                     | `update`, `delete`                                       | дождаться завершения и перейти к следующему шагу            |
-| `doOnNext`, `doOnSubscribe`, `doOnCancel`, `doOnComplete` | логирование, публикация событий | побочные действия, данные не меняются |
+| Оператор                                                  | Где                                                                                                                                                                                      | Что делает                                                                                   |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `map`                                                           | `create`: заказ → новая доставка; контроллер: доставка → `ResponseEntity`, событие → `ServerSentEvent`                                  | синхронно преобразует элемент                                              |
+| `filter`                                                        | `findAll` (фильтр по статусу); `create` (отменённый заказ); `watch` (события только нужной доставки); `simulate`           | пропускает только подходящие элементы                               |
+| `flatMap`                                                       | `details`: доставка → запрос заказа через WebClient; `create`: заказ → сохранение; `update`                                                 | преобразует элемент в новый `Mono`/`Flux` (асинхронный шаг) |
+| `flatMapMany`                                                   | `watch`: `Mono<Delivery>` → `Flux<DeliveryEvent>`                                                                                                                                    | из одного элемента делает поток                                            |
+| `concatMap`                                                     | `courierRoute`: смена статусов строго по очереди                                                                                                              | как `flatMap`, но с сохранением порядка                                     |
+| `switchIfEmpty`                                                 | `findById`, `delete` (нет доставки → 404); `create` (нет доставки на заказ → запрос в Order Service); Order Service: нет заказа → 404 | что делать, если данных нет                                                     |
+| `onErrorResume`                                                 | `details` (Order Service недоступен → ответ без заказа); SSE-поток (ошибка → событие `error`); Order Service (неверный id → 400)   | заменяет ошибку запасным результатом                                 |
+| `onErrorMap`                                                    | `OrderClient`: ошибка соединения → 503                                                                                                                                   | превращает одну ошибку в другую                                            |
+| `retryWhen(Retry.backoff)`                                      | `OrderClient`: повтор запроса при сбое соединения                                                                                                           | повтор с нарастающей паузой                                                   |
+| `delayElements`, `delayElement`                               | имитация курьера (пауза между статусами); задержка Order Service                                                                                  | задержка без блокировки потока (таймер)                              |
+| `takeUntil`                                                     | `watch`: поток заканчивается на финальном статусе                                                                                                     | завершает Flux после элемента, удовлетворяющего условию  |
+| `startWith`                                                     | `watch`: сначала текущее состояние, потом изменения                                                                                                  | добавляет элементы в начало потока                                      |
+| `index`                                                         | контроллер SSE: номер события → поле `id:`                                                                                                                     | нумерует элементы                                                                     |
+| `then`                                                          | `update`, `delete`                                                                                                                                                                      | дождаться завершения и перейти к следующему шагу            |
+| `doOnNext`, `doOnSubscribe`, `doOnCancel`, `doOnComplete` | логирование, публикация событий                                                                                                                                 | побочные действия, данные не меняются                                 |
 
 ### Два стиля WebFlux
 
@@ -225,17 +225,17 @@ webClient.get()
 
 ### Delivery Service (`http://localhost:8090`)
 
-| Метод и путь                          | Тип результата                     | Что делает                                                       | Коды            |
-| ------------------------------------- | ---------------------------------- | ---------------------------------------------------------------- | --------------- |
-| `GET /api/deliveries`                 | `Flux<Delivery>`                   | все доставки; `?status=IN_TRANSIT` — фильтр                      | 200             |
-| `GET /api/deliveries/{id}`            | `Mono<Delivery>`                   | одна доставка                                                    | 200, 404, 400   |
-| `POST /api/deliveries`                | `Mono<ResponseEntity<Delivery>>`   | создать доставку по заказу: `{"orderId": 1}`. Данные берутся из Order Service (WebClient) | 201, 400, 409, 422, 503 |
-| `PUT /api/deliveries/{id}`            | `Mono<Delivery>`                   | изменить курьера, стоимость, статус: `{"courier": "...", "price": 199, "status": "ACCEPTED"}` | 200, 400, 404, 409 |
-| `DELETE /api/deliveries/{id}`         | `Mono<Void>`                       | удалить доставку                                                 | 204, 404        |
-| `GET /api/deliveries/{id}/stream`     | `Flux<ServerSentEvent<...>>`, SSE  | поток изменений статуса                                          | 200             |
-| `GET /api/deliveries/{id}/details`    | `Mono<DeliveryDetails>`            | доставка + заказ из Order Service                                | 200, 404        |
-| `POST /api/deliveries/{id}/simulate`  | `Mono<Delivery>`                   | запустить имитацию курьера (статусы меняются каждые 2 с)         | 202, 404, 409   |
-| `GET /`                               | —                                  | демо-страница: таблица, GET (Mono), подписка на SSE              | 200             |
+| Метод и путь                 | Тип результата         | Что делает                                                                                                               | Коды                |
+| -------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `GET /api/deliveries`                | `Flux<Delivery>`                  | все доставки; `?status=IN_TRANSIT` — фильтр                                                                   | 200                     |
+| `GET /api/deliveries/{id}`           | `Mono<Delivery>`                  | одна доставка                                                                                                         | 200, 404, 400           |
+| `POST /api/deliveries`               | `Mono<ResponseEntity<Delivery>>`  | создать доставку по заказу: `{"orderId": 1}`. Данные берутся из Order Service (WebClient) | 201, 400, 409, 422, 503 |
+| `PUT /api/deliveries/{id}`           | `Mono<Delivery>`                  | изменить курьера, стоимость, статус: `{"courier": "...", "price": 199, "status": "ACCEPTED"}`     | 200, 400, 404, 409      |
+| `DELETE /api/deliveries/{id}`        | `Mono<Void>`                      | удалить доставку                                                                                                   | 204, 404                |
+| `GET /api/deliveries/{id}/stream`    | `Flux<ServerSentEvent<...>>`, SSE | поток изменений статуса                                                                                      | 200                     |
+| `GET /api/deliveries/{id}/details`   | `Mono<DeliveryDetails>`           | доставка + заказ из Order Service                                                                                  | 200, 404                |
+| `POST /api/deliveries/{id}/simulate` | `Mono<Delivery>`                  | запустить имитацию курьера (статусы меняются каждые 2 с)                            | 202, 404, 409           |
+| `GET /`                              | —                                  | демо-страница: таблица, GET (Mono), подписка на SSE                                                  | 200                     |
 
 Модель доставки (поля как в смарт-контракте ПР №6):
 
@@ -267,10 +267,10 @@ CREATED ──► ACCEPTED ──► IN_TRANSIT ──► DELIVERED
 
 ### Order Service (`http://localhost:8091`)
 
-| Метод и путь                          | Что делает                                   |
-| ------------------------------------- | -------------------------------------------- |
-| `GET /api/orders`                     | все заказы; `?status=ASSEMBLY&status=DELIVERY` — фильтр |
-| `GET /api/orders/{id}`                | заказ (задержка 300 мс); 404, если нет; 400, если id не число |
+| Метод и путь   | Что делает                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| `GET /api/orders`      | все заказы; `?status=ASSEMBLY&status=DELIVERY` — фильтр                      |
+| `GET /api/orders/{id}` | заказ (задержка 300 мс); 404, если нет; 400, если id не число |
 
 Заказы те же, что в демо-данных ПР №5 (клиенты Иванов, Петрова, Сидоров),
 плюс отменённый заказ 6.
@@ -328,19 +328,19 @@ deliveryService.watch(id)
 Ошибки обрабатываются внутри реактивной цепочки (`switchIfEmpty`,
 `onErrorResume`, `onErrorMap`) и превращаются в Problem Details.
 
-| Ситуация                                       | Где обрабатывается                         | Ответ                                    |
-| ---------------------------------------------- | ------------------------------------------ | ---------------------------------------- |
-| Доставки нет                                   | `switchIfEmpty(Mono.error(...))`           | 404 `Доставка 999 не найдена`            |
-| `id` не число (`/api/deliveries/abc`)          | `ErrorHandler`                             | 400 `Параметр id имеет неверный формат: abc` |
-| Тело не прошло валидацию                       | `@Valid` + `ErrorHandler`                  | 400 `Ошибка в теле запроса — orderId: укажите orderId` |
-| Нет заказа в Order Service                     | `WebClient.onStatus(404)`                  | 422 `Заказ 999 не найден в Order Service` |
-| Заказ отменён / на заказ уже есть доставка     | `filter` + `switchIfEmpty` / `flatMap`     | 409                                      |
-| Недопустимый переход (`CREATED → DELIVERED`)   | `checkUpdate` → `Mono.error`               | 409 `Недопустимый переход CREATED -> DELIVERED. Разрешены: [ACCEPTED, CANCELLED]` |
-| `ACCEPTED` без курьера                         | `checkUpdate`                              | 400 `Для статуса ACCEPTED нужно указать курьера` |
-| Order Service недоступен (`POST`)              | `retryWhen` (2 повтора) → `onErrorMap`     | 503 `Order Service недоступен: ...`      |
-| Order Service недоступен (`/details`)          | `onErrorResume`                            | 200, `"order": null`, причина в `orderError` |
-| SSE по несуществующей доставке                 | `onErrorResume` в контроллере              | событие `error` с `{"status":404,"detail":...}` |
-| Клиент закрыл SSE                              | WebFlux отменяет подписку (`doOnCancel`)   | подписка на шину удаляется, ресурсы освобождаются |
+| Ситуация                                                             | Где обрабатывается                        | Ответ                                                                                                      |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Доставки нет                                                      | `switchIfEmpty(Mono.error(...))`                         | 404 `Доставка 999 не найдена`                                                                |
+| `id` не число (`/api/deliveries/abc`)                             | `ErrorHandler`                                           | 400 `Параметр id имеет неверный формат: abc`                                       |
+| Тело не прошло валидацию                                | `@Valid` + `ErrorHandler`                              | 400 `Ошибка в теле запроса — orderId: укажите orderId`                              |
+| Нет заказа в Order Service                                         | `WebClient.onStatus(404)`                                | 422 `Заказ 999 не найден в Order Service`                                                       |
+| Заказ отменён / на заказ уже есть доставка | `filter` + `switchIfEmpty` / `flatMap`               | 409                                                                                                             |
+| Недопустимый переход (`CREATED → DELIVERED`)           | `checkUpdate` → `Mono.error`                          | 409 `Недопустимый переход CREATED -> DELIVERED. Разрешены: [ACCEPTED, CANCELLED]` |
+| `ACCEPTED` без курьера                                           | `checkUpdate`                                            | 400 `Для статуса ACCEPTED нужно указать курьера`                                 |
+| Order Service недоступен (`POST`)                                | `retryWhen` (2 повтора) → `onErrorMap`         | 503 `Order Service недоступен: ...`                                                                 |
+| Order Service недоступен (`/details`)                            | `onErrorResume`                                          | 200, `"order": null`, причина в `orderError`                                                        |
+| SSE по несуществующей доставке                       | `onErrorResume` в контроллере                | событие `error` с `{"status":404,"detail":...}`                                                     |
+| Клиент закрыл SSE                                                | WebFlux отменяет подписку (`doOnCancel`) | подписка на шину удаляется, ресурсы освобождаются                    |
 
 Почему ошибка SSE приходит событием, а не кодом 404: у SSE-ответа статус
 `200` и заголовки уже могут быть отправлены, поменять их потом нельзя.
@@ -352,12 +352,12 @@ RSocket в ПР №4: ошибка по одному заказу приходи
 
 ### Одинаковые сценарии в ПР №4 и ПР №7
 
-| Сценарий               | RSocket (ПР №4)                                              | WebFlux (ПР №7)                                                       |
-| ---------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| Получить один объект   | **Request-Response**: `requestResponse(payload)` → `Mono<Payload>`, маршрут `product.get` в metadata | **HTTP GET + Mono**: `GET /api/deliveries/{id}` → `Mono<Delivery>` |
-| Получить поток обновлений | **Request-Stream**: `requestStream(payload)` → `Flux<Payload>`, маршрут `product.stream` / обновления статусов в `order.track` | **HTTP/SSE + Flux**: `GET /api/deliveries/{id}/stream` → `Flux<ServerSentEvent>` |
-| Отправить без ответа   | **Fire-and-Forget**: `fireAndForget(payload)` → `Mono<Void>`, ответ не приходит вообще | прямого аналога нет. Ближайшее — `POST /simulate` → **202 Accepted**: работа идёт в фоне, но HTTP-ответ всё равно приходит |
-| Двусторонний поток     | **Channel**: `requestChannel(Publisher<Payload>)` ⇄ `Flux<Payload>` | **нет в HTTP API**. SSE односторонний (сервер → клиент); для двустороннего потока нужен WebSocket |
+| Сценарий                                 | RSocket (ПР №4)                                                                                                                                                      | WebFlux (ПР №7)                                                                                                                                                                                   |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Получить один объект           | **Request-Response**: `requestResponse(payload)` → `Mono<Payload>`, маршрут `product.get` в metadata                                               | **HTTP GET + Mono**: `GET /api/deliveries/{id}` → `Mono<Delivery>`                                                                                                                        |
+| Получить поток обновлений | **Request-Stream**: `requestStream(payload)` → `Flux<Payload>`, маршрут `product.stream` / обновления статусов в `order.track` | **HTTP/SSE + Flux**: `GET /api/deliveries/{id}/stream` → `Flux<ServerSentEvent>`                                                                                                          |
+| Отправить без ответа           | **Fire-and-Forget**: `fireAndForget(payload)` → `Mono<Void>`, ответ не приходит вообще                                                  | прямого аналога нет. Ближайшее — `POST /simulate` → **202 Accepted**: работа идёт в фоне, но HTTP-ответ всё равно приходит |
+| Двусторонний поток              | **Channel**: `requestChannel(Publisher<Payload>)` ⇄ `Flux<Payload>`                                                                                          | **нет в HTTP API**. SSE односторонний (сервер → клиент); для двустороннего потока нужен WebSocket                                     |
 
 Код сервера:
 
@@ -536,7 +536,7 @@ curl.exe -s -X POST http://localhost:8090/api/deliveries/4/simulate
 
 ### Шаг 4. Демо-страница в браузере
 
-Откройте <http://localhost:8090/>:
+Откройте [http://localhost:8090/](http://localhost:8090/):
 
 - **Обновить** — `GET /api/deliveries` (Flux → таблица);
 - **Создать доставку** — `POST` по номеру заказа (WebClient → Order Service);
@@ -550,6 +550,7 @@ curl.exe -s -X POST http://localhost:8090/api/deliveries/4/simulate
 ### Шаг 5. Что именно скриншотить
 
 1. **Реактивные HTTP-запросы (2–4 скриншота)** — вывод `demo.ps1`:
+
    - блоки 1 и 3: `GET` списка (Flux) и одной доставки (Mono);
    - блоки 4, 6, 7: обработка ошибок (404, 422, 409);
    - блоки 5 и 8: `POST` и `details` — внешний вызов WebClient к Order Service.
@@ -695,8 +696,7 @@ WebFlux. Контроллер возвращает описание цепочк
 через `startWith`.
 
 **Что происходит, когда клиент закрывает SSE?**
-WebFlux отменяет подписку на `Flux` (в логе `SSE: клиент отключился от
-доставки N`). Подписка на шину событий удаляется, утечки нет. Если
+WebFlux отменяет подписку на `Flux` (в логе `SSE: клиент отключился от доставки N`). Подписка на шину событий удаляется, утечки нет. Если
 соединение оборвалось, браузерный `EventSource` переподключается сам
 и передаёт `Last-Event-ID`.
 
